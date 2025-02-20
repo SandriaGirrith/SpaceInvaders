@@ -35,8 +35,8 @@
     </style>
 </head>
 <body>
-    <div id="ui">Leben: <span id="lives">5</span> | Welle: <span id="wave">1</span></div>
-    <div id="hint">Drücke ESC zum Beenden | Drücke R zum Neustarten</div>
+    <div id="ui">Lives: <span id="lives">5</span> | Wave: <span id="wave">1</span></div>
+    <div id="hint">Press ESC to stop the game | Press R to reload the game</div>
     <canvas id="gameCanvas" width="800" height="600"></canvas>
     <script>
         const canvas = document.getElementById('gameCanvas');
@@ -222,7 +222,7 @@
             }
 
             bullets.forEach(bullet => {
-                ctx.fillStyle = 'blue';
+                ctx.fillStyle = 'red';
                 ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
             });
 

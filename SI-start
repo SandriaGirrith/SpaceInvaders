@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Space Invaders</title>
+    <style>
+        canvas { 
+            border: 1px solid white; 
+            background: url('https://www.dropbox.com/scl/fi/tbkbryqkqgeov5up0vb0o/space-bg.jpg?rlkey=i3xiq0n376m87cvpphzr7l7dc&st=gpbiwsfx&raw=1') no-repeat center center; 
+            background-size: cover; 
+        }
+        body { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+            background: #000; 
+        }
+        #ui { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            color: white; 
+            font-family: 'Arial', sans-serif; 
+        }
+        #hint { 
+            position: absolute; 
+            bottom: 10px; 
+            left: 10px; 
+            color: white; 
+            font-family: 'Arial', sans-serif; 
+            font-size: 14px; 
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">Leben: <span id="lives">5</span> | Welle: <span id="wave">1</span></div>
+    <div id="hint">Drücke ESC zum Beenden | Drücke R zum Neustarten</div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const livesDisplay = document.getElementById('lives');
+        const waveDisplay = document.getElementById('wave');
+
+        // Spieler
+        let player = { x: 375, y: 520, width: 50, height: 70, speed: 5, lives: 5 };
+
+        // Bilder
+        const playerImg = new Image();
+        playerImg.src = 'https://www.dropbox.com/scl/fi/znyubg1mbs0yb8k4z9udo/spaceship.png?rlkey=u14rno255im08zu2v2f3a57bu&st=1j85lxe6&raw=1';
+        const enemyImg = new Image();
+        enemyImg.src = 'https://www.dropbox.com/scl/fi/1o9spg7dxxporswtdm27y/enemy.png?rlkey=xd4546b6i19qcq3wntjkvdgr1&st=v3a3elq4&raw=1';
+
+        // Projektile
+        let bullets = [];
+        let bulletCooldown = 0;
+        const bulletSpeed = 5;
+
+        // Gegner
+        let enemies = [];
+        let wave = 1;
+        let waveTransition = false;
+
+        // Booster
+        let boosterActive = false;
+        let boosterTimer = 0;
+        let boosterType = '';
+
+        // Spielstatus
+        let gameOver = false;
+
+        // Eingabe
+        const keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            if (e.key === 'Escape' && !gameOver) {
+                gameOver = true;
+                ctx.fillStyle = 'red';
+                ctx.font = '50px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Spiel beendet', canvas.width / 2, canvas.height / 2);
+            } else if (e.key === 'r' || e.key === 'R') {
+                restartGame();
+            }
+        });
+        document.addEventListener('keyup', (e) => keys[e.key] = false);
+
+        // Konstanten für Spawn-Logik
+        const maxEnemiesPerRow = 10;
+        const rowSpacing = 50;
+        const minX = 50;
+        const maxX = canvas.width - 50;
+
+        // Lebensabzug-Verzögerung
+        let lastLifeLostTime = 0;
+        const lifeLostDelay = 1000; // 1 Sekunde
+
+        function spawnWave() {
+            if (gameOver) return;
+            enemies = [];
+            const totalEnemies = 5 + wave * 2;
+            const rowsNeeded = Math.ceil(totalEnemies / maxEnemiesPerRow);
+            for (let row = 0; row < rowsNeeded; row++) {
+                const enemiesInThisRow = Math.min(maxEnemiesPerRow, totalEnemies - row * maxEnemiesPerRow);
+                const xSpacing = enemiesInThisRow > 1 ? (maxX - minX) / (enemiesInThisRow - 1) : 0;
+                for (let i = 0; i < enemiesInThisRow; i++) {
+                    const enemyX = minX + i * xSpacing;
+                    const enemyY = 50 + row * rowSpacing;
+                    enemies.push({
+                        x: enemyX,
+                        y: enemyY,
+                        width: 50,
+                        height: 40,
+                        speed: 0.5 + wave * 0.05,
+                        hp: 1
+                    });
+                }
+            }
+            waveTransition = true;
+            setTimeout(() => waveTransition = false, 2000);
+        }
+
+        function shoot() {
+            if (gameOver || bulletCooldown > 0) return;
+            if (boosterActive && boosterType === 'multi') {
+                bullets.push({ x: player.x + player.width / 2 - 5, y: player.y, width: 5, height: 10, angle: -0.1 });
+                bullets.push({ x: player.x + player.width / 2 - 5, y: player.y, width: 5, height: 10, angle: 0 });
+                bullets.push({ x: player.x + player.width / 2 - 5, y: player.y, width: 5, height: 10, angle: 0.1 });
+            } else {
+                bullets.push({ x: player.x + player.width / 2 - 5, y: player.y, width: 5, height: 10, angle: 0 });
+            }
+            bulletCooldown = boosterActive && boosterType === 'rapid' ? 10 : 20;
+        }
+
+        function activateBooster() {
+            if (gameOver) return;
+            boosterActive = true;
+            boosterTimer = 600;
+            if (wave % 9 === 0) boosterType = 'rapid';
+            else if (wave % 6 === 0) boosterType = 'multi';
+            else if (wave % 3 === 0) boosterType = 'power';
+        }
+
+        function gameLoop() {
+            if (gameOver) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Spieler bewegen
+            if (keys['ArrowLeft'] && player.x > 0) player.x -= player.speed;
+            if (keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += player.speed;
+            if (keys[' ']) shoot();
+
+            // Projektile bewegen
+            bulletCooldown--;
+            bullets.forEach((bullet, bIndex) => {
+                bullet.y -= bulletSpeed;
+                bullet.x += bullet.angle * bulletSpeed;
+                if (bullet.y < 0) bullets.splice(bIndex, 1);
+            });
+
+            // Kollisionen prüfen
+            bullets.forEach((bullet, bIndex) => {
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x + bullet.width + 20 > enemy.x &&
+                        bullet.x - 20 < enemy.x + enemy.width &&
+                        bullet.y + bullet.height + 20 > enemy.y &&
+                        bullet.y - 20 < enemy.y + enemy.height) {
+                        bullets.splice(bIndex, 1);
+                        enemy.hp -= boosterActive && boosterType === 'power' ? 2 : 1;
+                        if (enemy.hp <= 0) enemies.splice(eIndex, 1);
+                        return;
+                    }
+                });
+            });
+
+            // Gegner bewegen und Leben abziehen
+            const currentTime = Date.now();
+            enemies.forEach((enemy, eIndex) => {
+                enemy.y += enemy.speed;
+                if (enemy.y > canvas.height) {
+                    enemies.splice(eIndex, 1);
+                    if (player.lives > 0 && currentTime - lastLifeLostTime >= lifeLostDelay) {
+                        player.lives--;
+                        livesDisplay.textContent = player.lives;
+                        lastLifeLostTime = currentTime;
+                        if (player.lives <= 0) {
+                            gameOver = true;
+                            ctx.fillStyle = 'red';
+                            ctx.font = '50px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2);
+                        }
+                    }
+                }
+            });
+
+            // Neue Welle starten
+            if (enemies.length === 0 && !waveTransition) {
+                wave++;
+                waveDisplay.textContent = wave;
+                if (wave % 3 === 0) activateBooster();
+                spawnWave();
+            }
+
+            // Booster verwalten
+            if (boosterActive) {
+                boosterTimer--;
+                if (boosterTimer <= 0) boosterActive = false;
+                ctx.fillStyle = 'yellow';
+                ctx.font = '20px Arial';
+                ctx.fillText(`Booster: ${boosterType} (${Math.ceil(boosterTimer / 60)}s)`, player.x, player.y - 20);
+            }
+
+            // Zeichnen
+            if (playerImg.complete && playerImg.naturalWidth !== 0) {
+                ctx.drawImage(playerImg, player.x, player.y, player.width, player.height);
+            } else {
+                ctx.fillStyle = 'gray';
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+
+            bullets.forEach(bullet => {
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+
+            enemies.forEach(enemy => {
+                if (enemyImg.complete && enemyImg.naturalWidth !== 0) {
+                    ctx.drawImage(enemyImg, enemy.x, enemy.y, enemy.width, enemy.height);
+                } else {
+                    ctx.fillStyle = `hsl(${wave * 20}, 100%, 50%)`;
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                }
+            });
+
+            if (waveTransition) {
+                ctx.fillStyle = 'white';
+                ctx.font = '40px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Welle ${wave} beginnt!`, canvas.width / 2, canvas.height / 2);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function restartGame() {
+            player = { x: 375, y: 520, width: 50, height: 70, speed: 5, lives: 5 };
+            bullets = [];
+            enemies = [];
+            wave = 1;
+            waveTransition = false;
+            boosterActive = false;
+            boosterTimer = 0;
+            boosterType = '';
+            gameOver = false;
+            lastLifeLostTime = 0;
+            livesDisplay.textContent = player.lives;
+            waveDisplay.textContent = wave;
+            spawnWave();
+            gameLoop();
+        }
+
+        // Spiel starten
+        spawnWave();
+        gameLoop();
+    </script>
+</body>
+</html>
